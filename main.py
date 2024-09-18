@@ -26,21 +26,42 @@ def multiply_nums(a: int, b: int):
     return a * b
 
 
+function_names = {
+    "add_nums": functools.partial(add_nums),
+    "subtract_nums": functools.partial(subtract_nums),
+    "multiply_nums": functools.partial(multiply_nums),
+}
 
-
-def gemini_call(input: str):
-    instruction = "You are a helpful calculator bot. You can add, subtract, and multiply numbers. Do not perform any other task."
+def gemini_call(input: str, automatic_function_calling):
+    instruction = "You are a helpful calculator bot. You can add, subtract, and multiply numbers. State the answer by saying 'the answer is: ' "
 
     tool_list = [add_nums, subtract_nums, multiply_nums]
     gemini_model = genai.GenerativeModel(
-        "models/gemini-1.5-pro", tools=tool_list, system_instruction=instruction
+        "models/gemini-1.5-flash", tools=tool_list, system_instruction=instruction
     )
 
-    # gemini_chat = gemini_model.start_chat() #This will just return information on what function to run
-    gemini_chat = gemini_model.start_chat(enable_automatic_function_calling=True) # use this to automatically run the function that gemini decides
+
+    gemini_chat = gemini_model.start_chat(enable_automatic_function_calling=automatic_function_calling) # set true to automatically run the function that gemini decides
 
     response = gemini_chat.send_message(input)
-    print(response.parts)
+
+    if not automatic_function_calling:
+        responses = {}
+        for part in response.parts:
+            if fn := part.function_call:
+
+                args = {key: val for key, val in fn.args.items()}
+                function_result = function_names[fn.name](**args)
+                responses[fn.name] = function_result
+        response_parts = [
+        genai.protos.Part(function_response=genai.protos.FunctionResponse(name=fn, response={"result": val}))
+            for fn, val in responses.items()
+        ]
+
+        response = gemini_chat.send_message(genai.protos.Content(parts=response_parts))
+        print(response.text)
+    else:
+        print(response.parts[0].text)
 
 def mistral_call(input: str):
     model = "mistral-large-latest"
@@ -110,13 +131,6 @@ def mistral_call(input: str):
         },
     ]
 
-    function_names = {
-        "add_nums": functools.partial(add_nums),
-        "subtract_nums": functools.partial(subtract_nums),
-        "multiply_nums": functools.partial(multiply_nums),
-
-
-    }
 
     messages = [{"role": "user", "content": input}]
 
@@ -143,5 +157,5 @@ def mistral_call(input: str):
 
 
 if __name__ == '__main__':
-    gemini_call("what is 5 - 7")
+    gemini_call("what is 5 * 7?", automatic_function_calling=False)
     mistral_call("what is 5 * 7")
